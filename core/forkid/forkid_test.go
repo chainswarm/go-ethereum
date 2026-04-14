@@ -78,14 +78,14 @@ func TestCreation(t *testing.T) {
 				{30000000, 1710338134, ID{Hash: checksumToBytes(0xdce96c2d), Next: 1710338135}}, // Last Shanghai block
 				{30000000, 1710338135, ID{Hash: checksumToBytes(0x9f3d2254), Next: 1746612311}}, // First Cancun block
 				{30000000, 1746022486, ID{Hash: checksumToBytes(0x9f3d2254), Next: 1746612311}}, // Last Cancun block
-				{30000000, 1746612311, ID{Hash: checksumToBytes(0xc376cf8b), Next: 1764798551}},  // First Prague block
-				{30000000, 1764798550, ID{Hash: checksumToBytes(0xc376cf8b), Next: 1764798551}},  // Last Prague block
-				{30000000, 1764798551, ID{Hash: checksumToBytes(0x5167e2a6), Next: 1765290071}},  // First Osaka block
-				{30000000, 1765290070, ID{Hash: checksumToBytes(0x5167e2a6), Next: 1765290071}},  // Last Osaka block
-				{30000000, 1765290071, ID{Hash: checksumToBytes(0xcba2a1c0), Next: 1767747671}},  // First BPO1 block
-				{30000000, 1767747670, ID{Hash: checksumToBytes(0xcba2a1c0), Next: 1767747671}},  // Last BPO1 block
-				{30000000, 1767747671, ID{Hash: checksumToBytes(0x07c9462e), Next: 0}},           // First BPO2 block
-				{50000000, 2000000000, ID{Hash: checksumToBytes(0x07c9462e), Next: 0}},           // Future BPO2 block
+				{30000000, 1746612311, ID{Hash: checksumToBytes(0xc376cf8b), Next: 1764798551}}, // First Prague block
+				{30000000, 1764798550, ID{Hash: checksumToBytes(0xc376cf8b), Next: 1764798551}}, // Last Prague block
+				{30000000, 1764798551, ID{Hash: checksumToBytes(0x5167e2a6), Next: 1765290071}}, // First Osaka block
+				{30000000, 1765290070, ID{Hash: checksumToBytes(0x5167e2a6), Next: 1765290071}}, // Last Osaka block
+				{30000000, 1765290071, ID{Hash: checksumToBytes(0xcba2a1c0), Next: 1767747671}}, // First BPO1 block
+				{30000000, 1767747670, ID{Hash: checksumToBytes(0xcba2a1c0), Next: 1767747671}}, // Last BPO1 block
+				{30000000, 1767747671, ID{Hash: checksumToBytes(0x07c9462e), Next: 0}},          // First BPO2 block
+				{50000000, 2000000000, ID{Hash: checksumToBytes(0x07c9462e), Next: 0}},          // Future BPO2 block
 			},
 		},
 		// Sepolia test cases
