@@ -340,7 +340,7 @@ func (s *StateDB) Recording() bool {
 	return s.recording
 }
 
-var ErrArbTxFilter error = errors.New("internal error")
+var ErrArbTxFilter error = errors.New("Transaction rejected by chain policy")
 
 // AddressCheckerState tracks address filtering for a single transaction.
 // Implementations manage their own synchronization (sync, WaitGroup, channels, etc).
