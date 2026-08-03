@@ -133,8 +133,8 @@ func WriteActivatedAsm(db ethdb.KeyValueWriter, target WasmTarget, moduleHash co
 		return fmt.Errorf("Failed to store activated wasm asm: %w", err)
 	}
 	key := activatedKey(prefix, moduleHash)
-	if err != nil {
-		return fmt.Errorf("Failed to store activated wasm key: %w", key)
+	if err := db.Put(key[:], asm); err != nil {
+		return fmt.Errorf("Failed to store activated wasm key: %w", err)
 	}
 	return nil
 }
