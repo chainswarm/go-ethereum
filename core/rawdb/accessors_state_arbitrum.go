@@ -118,12 +118,16 @@ func IsSupportedWasmTarget(target WasmTarget) bool {
 	return err == nil
 }
 
-func WriteActivation(db ethdb.KeyValueWriter, moduleHash common.Hash, asmMap map[WasmTarget][]byte) {
+func WriteActivation(db ethdb.KeyValueWriter, moduleHash common.Hash, asmMap map[WasmTarget][]byte) error {
 	for target, asm := range asmMap {
 		if target != TargetWasm {
-			WriteActivatedAsm(db, target, moduleHash, asm)
+			err := WriteActivatedAsm(db, target, moduleHash, asm)
+			if err != nil {
+				return err
+			}
 		}
 	}
+	return nil
 }
 
 // Stores the activated asm for a given moduleHash and target

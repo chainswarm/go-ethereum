@@ -1486,7 +1486,9 @@ func (s *StateDB) commitAndFlush(block uint64, deleteEmptyObjects bool, noStorag
 		batch := db.NewBatch()
 		// Arbitrum: write Stylus programs to disk
 		for moduleHash, asmMap := range ret.activatedWasms {
-			rawdb.WriteActivation(batch, moduleHash, asmMap)
+			if err := rawdb.WriteActivation(batch, moduleHash, asmMap); err != nil {
+				return nil, fmt.Errorf("writeActivation failed: %w", err)
+			}
 			if batch.ValueSize() >= ethdb.IdealBatchSize {
 				if err := batch.Write(); err != nil {
 					return nil, err
