@@ -12,6 +12,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/eth/filters"
+	"github.com/ethereum/go-ethereum/eth/tracers"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/internal/shutdowncheck"
@@ -26,6 +27,8 @@ type Backend struct {
 	apiBackend *APIBackend
 	config     *Config
 	chainDb    ethdb.Database
+
+	traceCache tracers.TraceCache // set through SetTraceCache before serving starts
 
 	txFeed event.Feed
 	scope  event.SubscriptionScope
@@ -102,10 +105,14 @@ func (b *Backend) AccountManager() *accounts.Manager { return b.stack.AccountMan
 func (b *Backend) APIBackend() *APIBackend           { return b.apiBackend }
 func (b *Backend) APIs() []rpc.API                   { return b.apiBackend.GetAPIs(b.filterSystem) }
 func (b *Backend) ArbInterface() ArbInterface        { return b.arb }
-func (b *Backend) BlockChain() *core.BlockChain      { return b.arb.BlockChain() }
-func (b *Backend) ChainDb() ethdb.Database           { return b.chainDb }
-func (b *Backend) Engine() consensus.Engine          { return b.arb.BlockChain().Engine() }
-func (b *Backend) Stack() *node.Node                 { return b.stack }
+
+// SetTraceCache installs the durable trace cache consulted by the debug
+// trace APIs. Call before RPC serving starts.
+func (b *Backend) SetTraceCache(c tracers.TraceCache) { b.traceCache = c }
+func (b *Backend) BlockChain() *core.BlockChain       { return b.arb.BlockChain() }
+func (b *Backend) ChainDb() ethdb.Database            { return b.chainDb }
+func (b *Backend) Engine() consensus.Engine           { return b.arb.BlockChain().Engine() }
+func (b *Backend) Stack() *node.Node                  { return b.stack }
 
 func (b *Backend) ResetWithGenesisBlock(gb *types.Block) {
 	b.arb.BlockChain().ResetWithGenesisBlock(gb)

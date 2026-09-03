@@ -26,6 +26,7 @@ import (
 	"os"
 	"reflect"
 	"slices"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -61,9 +62,13 @@ type testBackend struct {
 	chaindb     ethdb.Database
 	chain       *core.BlockChain
 
+	traceCache TraceCache // optional durable trace cache stub
+
 	refHook func() // Hook is invoked when the requested state is referenced
 	relHook func() // Hook is invoked when the requested state is released
 }
+
+func (b *testBackend) TraceCache() TraceCache { return b.traceCache }
 
 // newTestBackend creates a new test backend. OBS: After test is done, teardown must be
 // invoked in order to release associated resources.
@@ -1390,5 +1395,101 @@ func TestDefaultTraceTimeoutSetter(t *testing.T) {
 	SetDefaultTraceTimeout(30 * time.Second)
 	if got := DefaultTraceTimeout(); got != 30*time.Second {
 		t.Fatalf("after set = %v, want 30s", got)
+	}
+}
+
+// countingCache is a tracers.TraceCache stub: primed entries serve verbatim,
+// misses record the re-execution through Put.
+type countingCache struct {
+	mu   sync.Mutex
+	data map[common.Hash]json.RawMessage
+	hits int
+	puts int
+}
+
+func newCountingCache() *countingCache {
+	return &countingCache{data: map[common.Hash]json.RawMessage{}}
+}
+
+func (c *countingCache) Get(hash common.Hash, number uint64) json.RawMessage {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if d, ok := c.data[hash]; ok {
+		c.hits++
+		return d
+	}
+	return nil
+}
+
+func (c *countingCache) Put(hash common.Hash, number uint64, results json.RawMessage) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.puts++
+	c.data[hash] = results
+}
+
+func TestTraceBlockByNumberServesFromCache(t *testing.T) {
+	t.Parallel()
+
+	accounts := newAccounts(2)
+	genesis := &core.Genesis{
+		Config: params.TestChainConfig,
+		Alloc: types.GenesisAlloc{
+			accounts[0].addr: {Balance: big.NewInt(params.Ether)},
+		},
+	}
+	backend := newTestBackend(t, 1, genesis, func(i int, b *core.BlockGen) {
+		tx, _ := types.SignTx(types.NewTx(&types.LegacyTx{
+			Nonce:    uint64(i),
+			To:       &accounts[1].addr,
+			Value:    big.NewInt(1000),
+			Gas:      params.TxGas,
+			GasPrice: b.BaseFee(),
+		}), types.HomesteadSigner{}, accounts[0].key)
+		b.AddTx(tx)
+	})
+	defer backend.teardown()
+
+	block, err := backend.BlockByNumber(context.Background(), rpc.BlockNumber(1))
+	if err != nil || block == nil {
+		t.Fatalf("block 1: %v", err)
+	}
+
+	cache := newCountingCache()
+	primed := json.RawMessage(`[{"txHash":"0x000000000000000000000000000000000000000000000000000000000000cabe","result":{"cached":true}}]`)
+	cache.data[block.Hash()] = primed
+	backend.traceCache = cache
+
+	api := NewAPI(backend)
+	tracer := "callTracer"
+	cfg := &TraceConfig{Tracer: &tracer}
+
+	for i := 0; i < 2; i++ {
+		got, err := api.TraceBlockByNumber(context.Background(), rpc.BlockNumber(1), cfg)
+		if err != nil {
+			t.Fatalf("call %d: %v", i, err)
+		}
+		raw, ok := got.(json.RawMessage)
+		if !ok {
+			t.Fatalf("call %d: cached hit must return json.RawMessage, got %T", i, got)
+		}
+		if string(raw) != string(primed) {
+			t.Fatalf("call %d: cached bytes = %s, want %s", i, raw, primed)
+		}
+	}
+	if cache.hits != 2 {
+		t.Fatalf("hits = %d, want 2", cache.hits)
+	}
+	if cache.puts != 0 {
+		t.Fatalf("primed entries must not be overwritten: puts = %d", cache.puts)
+	}
+
+	// A call without a tracer config uses the struct logger and must NOT
+	// touch the cache.
+	if _, err := api.TraceBlockByNumber(context.Background(), rpc.BlockNumber(1), nil); err != nil {
+		t.Fatal(err)
+	}
+	if cache.hits != 2 || cache.puts != 0 {
+		t.Fatalf("struct-logger call must bypass the cache: hits=%d puts=%d", cache.hits, cache.puts)
 	}
 }

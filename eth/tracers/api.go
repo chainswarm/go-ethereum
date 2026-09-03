@@ -111,6 +111,9 @@ type Backend interface {
 	ChainDb() ethdb.Database
 	StateAtBlock(ctx context.Context, block *types.Block, reexec uint64, base *state.StateDB, readOnly bool, preferDisk bool) (*state.StateDB, StateReleaseFunc, error)
 	StateAtTransaction(ctx context.Context, block *types.Block, txIndex int, reexec uint64) (*types.Transaction, vm.BlockContext, *state.StateDB, StateReleaseFunc, error)
+	// TraceCache returns the durable trace cache, or nil when the
+	// integration runs without one.
+	TraceCache() TraceCache
 }
 
 // API is the collection of tracing APIs exposed over the private debugging endpoint.
@@ -471,22 +474,57 @@ func (api *API) traceChain(start, end *types.Block, config *TraceConfig, closed 
 
 // TraceBlockByNumber returns the structured logs created during the execution of
 // EVM and returns them as a JSON object.
-func (api *API) TraceBlockByNumber(ctx context.Context, number rpc.BlockNumber, config *TraceConfig) ([]*txTraceResult, error) {
+//
+// The return type is interface{} so a durable-cache hit can return the
+// stored bytes as json.RawMessage — marshaled verbatim, byte-identical to
+// what re-execution would produce — while a miss returns the typed slice.
+func (api *API) TraceBlockByNumber(ctx context.Context, number rpc.BlockNumber, config *TraceConfig) (interface{}, error) {
 	block, err := api.blockByNumber(ctx, number)
 	if err != nil {
 		return nil, err
 	}
-	return api.traceBlock(ctx, block, config)
+	return api.traceBlockCached(ctx, block, config)
 }
 
 // TraceBlockByHash returns the structured logs created during the execution of
 // EVM and returns them as a JSON object.
-func (api *API) TraceBlockByHash(ctx context.Context, hash common.Hash, config *TraceConfig) ([]*txTraceResult, error) {
+func (api *API) TraceBlockByHash(ctx context.Context, hash common.Hash, config *TraceConfig) (interface{}, error) {
 	block, err := api.blockByHash(ctx, hash)
 	if err != nil {
 		return nil, err
 	}
-	return api.traceBlock(ctx, block, config)
+	return api.traceBlockCached(ctx, block, config)
+}
+
+// isPlainCallTracerCall reports whether the call produces exactly the JSON
+// the durable trace cache stores: the callTracer with no tracer-specific
+// config. A nil config selects the struct logger, whose output shape
+// differs, so such calls bypass the cache entirely. The per-call Timeout
+// and Reexec fields do not change the output bytes.
+func isPlainCallTracerCall(config *TraceConfig) bool {
+	return config != nil && config.Tracer != nil && *config.Tracer == "callTracer" && config.TracerConfig == nil
+}
+
+// traceBlockCached consults the durable trace cache before re-executing.
+// On a hit the stored bytes are returned verbatim; on a miss the block is
+// traced and the result stored. Calls that cannot reuse cached bytes go
+// straight to traceBlock.
+func (api *API) traceBlockCached(ctx context.Context, block *types.Block, config *TraceConfig) (interface{}, error) {
+	cache := api.backend.TraceCache()
+	if cache == nil || !isPlainCallTracerCall(config) {
+		return api.traceBlock(ctx, block, config)
+	}
+	if raw := cache.Get(block.Hash(), block.NumberU64()); raw != nil {
+		return raw, nil
+	}
+	results, err := api.traceBlock(ctx, block, config)
+	if err != nil {
+		return nil, err
+	}
+	if raw, err := json.Marshal(results); err == nil {
+		cache.Put(block.Hash(), block.NumberU64(), raw)
+	}
+	return results, nil
 }
 
 // TraceBlock returns the structured logs created during the execution of EVM
@@ -910,6 +948,26 @@ func (api *API) TraceTransaction(ctx context.Context, hash common.Hash, config *
 	// It shouldn't happen in practice.
 	if blockNumber == 0 {
 		return nil, errors.New("genesis is not traceable")
+	}
+	// The durable trace cache stores whole-block results. On a hit, the
+	// matching transaction's subtree is extracted as json.RawMessage —
+	// identical bytes to what re-execution marshals, with no float
+	// round-trip.
+	if cache := api.backend.TraceCache(); cache != nil && isPlainCallTracerCall(config) {
+		if raw := cache.Get(blockHash, blockNumber); raw != nil {
+			var entries []struct {
+				TxHash common.Hash     `json:"txHash"`
+				Result json.RawMessage `json:"result"`
+			}
+			if json.Unmarshal(raw, &entries) == nil {
+				for _, e := range entries {
+					if e.TxHash == hash {
+						return e.Result, nil
+					}
+				}
+				return nil, errTxNotFound
+			}
+		}
 	}
 	reexec := defaultTraceReexec
 	if config != nil && config.Reexec != nil {

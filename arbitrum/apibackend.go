@@ -375,6 +375,12 @@ func (a *APIBackend) ChainDb() ethdb.Database {
 	return a.b.chainDb
 }
 
+// TraceCache returns the durable trace cache installed on the backend, or
+// nil when the node runs without one.
+func (a *APIBackend) TraceCache() tracers.TraceCache {
+	return a.b.traceCache
+}
+
 func (a *APIBackend) AccountManager() *accounts.Manager {
 	return a.b.stack.AccountManager()
 }
