@@ -1379,3 +1379,16 @@ func TestStandardTraceBlockToFile(t *testing.T) {
 		}
 	}
 }
+
+func TestDefaultTraceTimeoutSetter(t *testing.T) {
+	orig := DefaultTraceTimeout()
+	defer SetDefaultTraceTimeout(orig)
+
+	if orig != 5*time.Second {
+		t.Fatalf("default = %v, want 5s", orig)
+	}
+	SetDefaultTraceTimeout(30 * time.Second)
+	if got := DefaultTraceTimeout(); got != 30*time.Second {
+		t.Fatalf("after set = %v, want 30s", got)
+	}
+}

@@ -46,11 +46,31 @@ import (
 	"github.com/ethereum/go-ethereum/rpc"
 )
 
-const (
-	// defaultTraceTimeout is the amount of time a single transaction can execute
-	// by default before being forcefully aborted.
-	defaultTraceTimeout = 5 * time.Second
+// defaultTraceTimeout is the amount of time a single transaction can execute
+// by default before being forcefully aborted. It is a variable so node
+// integrations can override the default through SetDefaultTraceTimeout at
+// boot; it must not be changed once RPC serving has started.
+var defaultTraceTimeout = 5 * time.Second
 
+var defaultTraceTimeoutMu sync.RWMutex
+
+// SetDefaultTraceTimeout overrides the per-transaction trace budget used
+// when a debug_trace* call carries no timeout config of its own.
+// Boot-time only.
+func SetDefaultTraceTimeout(d time.Duration) {
+	defaultTraceTimeoutMu.Lock()
+	defer defaultTraceTimeoutMu.Unlock()
+	defaultTraceTimeout = d
+}
+
+// DefaultTraceTimeout returns the current default trace budget.
+func DefaultTraceTimeout() time.Duration {
+	defaultTraceTimeoutMu.RLock()
+	defer defaultTraceTimeoutMu.RUnlock()
+	return defaultTraceTimeout
+}
+
+const (
 	// defaultTraceReexec is the number of blocks the tracer is willing to go back
 	// and reexecute to produce missing historical state necessary to run a specific
 	// trace.
@@ -1025,7 +1045,7 @@ func (api *API) traceTx(ctx context.Context, tx *types.Transaction, message *cor
 	var (
 		tracer  *Tracer
 		err     error
-		timeout = defaultTraceTimeout
+		timeout = DefaultTraceTimeout()
 		usedGas uint64
 	)
 	if config == nil {
