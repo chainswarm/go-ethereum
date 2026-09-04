@@ -440,6 +440,8 @@ func (b *EthAPIBackend) BlobBaseFee(ctx context.Context) *big.Int {
 	return nil
 }
 
+func (b *EthAPIBackend) TraceCache() tracers.TraceCache { return b.eth.traceCache }
+
 func (b *EthAPIBackend) ChainDb() ethdb.Database {
 	return b.eth.ChainDb()
 }

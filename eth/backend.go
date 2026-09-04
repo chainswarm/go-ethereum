@@ -97,6 +97,8 @@ type Ethereum struct {
 	localTxTracker *locals.TxTracker
 	blockchain     *core.BlockChain
 
+	traceCache tracers.TraceCache // optional durable trace cache
+
 	handler *handler
 	discmix *enode.FairMix
 	dropper *dropper
@@ -423,8 +425,12 @@ func (s *Ethereum) ResetWithGenesisBlock(gb *types.Block) {
 
 func (s *Ethereum) Miner() *miner.Miner { return s.miner }
 
-func (s *Ethereum) AccountManager() *accounts.Manager  { return s.accountManager }
-func (s *Ethereum) BlockChain() *core.BlockChain       { return s.blockchain }
+func (s *Ethereum) AccountManager() *accounts.Manager { return s.accountManager }
+func (s *Ethereum) BlockChain() *core.BlockChain      { return s.blockchain }
+
+// SetTraceCache installs the durable trace cache consulted by the debug
+// trace APIs. Call before RPC serving starts.
+func (s *Ethereum) SetTraceCache(c tracers.TraceCache) { s.traceCache = c }
 func (s *Ethereum) TxPool() *txpool.TxPool             { return s.txPool }
 func (s *Ethereum) BlobTxPool() *blobpool.BlobPool     { return s.blobTxPool }
 func (s *Ethereum) Engine() consensus.Engine           { return s.engine }
