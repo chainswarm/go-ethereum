@@ -28,6 +28,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/tracing"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/crypto/kzg4844"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/holiman/uint256"
@@ -745,6 +746,7 @@ func (st *stateTransition) execute() (*ExecutionResult, error) {
 	// Check against hardcoded transaction hashes that have previously reverted, so instead
 	// of executing the transaction we just update state nonce and remaining gas to avoid
 	// state divergence.
+	gasBeforeRevert := st.gasRemaining
 	usedMultiGas, vmerr = st.evm.ProcessingHook.RevertedTxHook(&st.gasRemaining, usedMultiGas)
 
 	// vmerr is only not nil when we find a previous reverted transaction
@@ -777,6 +779,19 @@ func (st *stateTransition) execute() (*ExecutionResult, error) {
 			// Execute the transaction's call.
 			ret, st.gasRemaining, multiGas, vmerr = st.evm.Call(msg.From, st.to(), msg.Data, st.gasRemaining, value)
 			usedMultiGas = usedMultiGas.SaturatingAdd(multiGas)
+		}
+	} else if tracer := st.evm.Config.Tracer; tracer != nil {
+		// The processing hook rejected this transaction before EVM Call/Create,
+		// so those methods cannot report its failed root scope to the tracer.
+		typ, to := vm.CALL, st.to()
+		if contractCreation {
+			typ, to = vm.CREATE, crypto.CreateAddress(msg.From, msg.Nonce)
+		}
+		if tracer.OnEnter != nil {
+			tracer.OnEnter(0, byte(typ), msg.From, to, msg.Data, gasBeforeRevert, msg.Value)
+		}
+		if tracer.OnExit != nil {
+			tracer.OnExit(0, nil, gasBeforeRevert-st.gasRemaining, vm.VMErrorFromErr(vmerr), true)
 		}
 	}
 
