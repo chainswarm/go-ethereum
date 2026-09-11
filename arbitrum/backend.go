@@ -12,6 +12,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/eth/filters"
+	"github.com/ethereum/go-ethereum/eth/receipts"
 	"github.com/ethereum/go-ethereum/eth/tracers"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/event"
@@ -28,7 +29,8 @@ type Backend struct {
 	config     *Config
 	chainDb    ethdb.Database
 
-	traceCache tracers.TraceCache // set through SetTraceCache before serving starts
+	traceCache   tracers.TraceCache // set through SetTraceCache before serving starts
+	receiptCache receipts.Cache     // set through SetReceiptCache before serving starts
 
 	txFeed event.Feed
 	scope  event.SubscriptionScope
@@ -109,10 +111,14 @@ func (b *Backend) ArbInterface() ArbInterface        { return b.arb }
 // SetTraceCache installs the durable trace cache consulted by the debug
 // trace APIs. Call before RPC serving starts.
 func (b *Backend) SetTraceCache(c tracers.TraceCache) { b.traceCache = c }
-func (b *Backend) BlockChain() *core.BlockChain       { return b.arb.BlockChain() }
-func (b *Backend) ChainDb() ethdb.Database            { return b.chainDb }
-func (b *Backend) Engine() consensus.Engine           { return b.arb.BlockChain().Engine() }
-func (b *Backend) Stack() *node.Node                  { return b.stack }
+
+// SetReceiptCache installs the durable receipt cache consulted by
+// eth_getBlockReceipts. Call before RPC serving starts.
+func (b *Backend) SetReceiptCache(c receipts.Cache) { b.receiptCache = c }
+func (b *Backend) BlockChain() *core.BlockChain     { return b.arb.BlockChain() }
+func (b *Backend) ChainDb() ethdb.Database          { return b.chainDb }
+func (b *Backend) Engine() consensus.Engine         { return b.arb.BlockChain().Engine() }
+func (b *Backend) Stack() *node.Node                { return b.stack }
 
 func (b *Backend) ResetWithGenesisBlock(gb *types.Block) {
 	b.arb.BlockChain().ResetWithGenesisBlock(gb)

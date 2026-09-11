@@ -26,6 +26,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/eth"
 	"github.com/ethereum/go-ethereum/eth/filters"
+	"github.com/ethereum/go-ethereum/eth/receipts"
 	"github.com/ethereum/go-ethereum/eth/tracers"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/event"
@@ -379,6 +380,18 @@ func (a *APIBackend) ChainDb() ethdb.Database {
 // nil when the node runs without one.
 func (a *APIBackend) TraceCache() tracers.TraceCache {
 	return a.b.traceCache
+}
+
+// ReceiptCache returns the durable receipt cache installed on the backend, or
+// nil when the node runs without one.
+func (a *APIBackend) ReceiptCache() receipts.Cache {
+	return a.b.receiptCache
+}
+
+// GetBlockReceipts exposes the standard receipt builder to Nitro's bounded
+// warmer. The RPC registration still comes from internal/ethapi.GetAPIs.
+func (a *APIBackend) GetBlockReceipts(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) ([]map[string]interface{}, error) {
+	return ethapi.NewBlockChainAPI(a).GetBlockReceipts(ctx, blockNrOrHash)
 }
 
 func (a *APIBackend) AccountManager() *accounts.Manager {
