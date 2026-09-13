@@ -18,6 +18,7 @@ package pathdb
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -205,5 +206,110 @@ func TestHistoricalStateReader(t *testing.T) {
 	_, err = env.db.HistoricReader(realRoot)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
+	}
+}
+
+// A syncing node replaces the bottom disk layer about once per block, and a
+// parallel range trace issues thousands of historic reads per block, so a
+// reader can resolve a bottom layer that goes stale before it reads it. The
+// stale error used to escape to core/state, which swallows it into a zero
+// value — the 2026-09-13 nitro-robinhood-0 divide-by-zero crash loop. The
+// reader must re-resolve the bottom layer and return the real value.
+func TestHistoricalStateReaderRetriesStaleBottom(t *testing.T) {
+	config := &testerConfig{
+		stateHistory:  0,
+		layers:        64,
+		maxDiffLayers: 4,
+		enableIndex:   true,
+	}
+	env := newTester(t, config)
+	defer env.release()
+	waitIndexing(env.db)
+
+	root := env.roots[9]
+	reader, err := env.db.HistoricReader(root)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	live := env.db.tree.bottom()
+	stale := newDiskLayer(live.root, live.id, live.db, live.nodes, live.states, live.buffer, live.frozen)
+	stale.markStale()
+	if _, err := stale.account(common.Hash{}, 0); !errors.Is(err, errSnapshotStale) {
+		t.Fatalf("injected layer must read as stale, got %v", err)
+	}
+
+	var (
+		addrHash common.Hash
+		want     []byte
+	)
+	for hash, data := range env.snapAccounts[root] {
+		if len(data) > 0 {
+			addrHash, want = hash, data
+			break
+		}
+	}
+	if want == nil {
+		t.Fatal("no account in fixture")
+	}
+	addr := env.accountPreimage(addrHash)
+
+	// Stale on the first resolve, live afterwards: the read must succeed with
+	// the historical value, not the stale error or a zero.
+	calls := 0
+	reader.bottom = func() *diskLayer {
+		calls++
+		if calls == 1 {
+			return stale
+		}
+		return env.db.tree.bottom()
+	}
+	before := historicalStaleRetryMeter.Snapshot().Count()
+	got, err := reader.AccountRLP(addr)
+	if err != nil {
+		t.Fatalf("stale bottom must be retried, got error: %v", err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("wrong account after retry: got %x want %x", got, want)
+	}
+	if calls != 2 {
+		t.Fatalf("expected exactly one retry, resolved bottom %d times", calls)
+	}
+	if delta := historicalStaleRetryMeter.Snapshot().Count() - before; delta != 1 {
+		t.Fatalf("retry meter delta = %d, want 1", delta)
+	}
+
+	// Storage takes the same path.
+	var (
+		slotHash common.Hash
+		slotWant []byte
+	)
+	for hash, data := range env.snapStorages[root][addrHash] {
+		if len(data) > 0 {
+			slotHash, slotWant = hash, data
+			break
+		}
+	}
+	if slotWant != nil {
+		calls = 0
+		got, err := reader.Storage(addr, env.hashPreimage(slotHash))
+		if err != nil {
+			t.Fatalf("stale bottom must be retried for storage, got error: %v", err)
+		}
+		if !bytes.Equal(got, slotWant) {
+			t.Fatalf("wrong storage after retry: got %x want %x", got, slotWant)
+		}
+		if calls != 2 {
+			t.Fatalf("expected exactly one storage retry, resolved bottom %d times", calls)
+		}
+	}
+
+	// A layer that never stops being stale must still fail, bounded, not spin.
+	calls = 0
+	reader.bottom = func() *diskLayer { calls++; return stale }
+	if _, err := reader.AccountRLP(addr); !errors.Is(err, errSnapshotStale) {
+		t.Fatalf("permanently stale bottom must surface errSnapshotStale, got %v", err)
+	}
+	if calls != historicStaleRetries+1 {
+		t.Fatalf("expected %d bounded attempts, got %d", historicStaleRetries+1, calls)
 	}
 }

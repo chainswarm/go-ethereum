@@ -115,4 +115,8 @@ var (
 	storageSnapReadCounter = metrics.NewRegisteredCounter("pathdb/generation/duration/storage/snapread", nil)
 	storageWriteCounter    = metrics.NewRegisteredCounter("pathdb/generation/duration/storage/write", nil)
 	storageCleanCounter    = metrics.NewRegisteredCounter("state/snapshot/generation/duration/storage/clean", nil)
+
+	// historicalStaleRetryMeter counts historical reads that found the bottom
+	// disk layer already stale and re-resolved it.
+	historicalStaleRetryMeter = metrics.NewRegisteredMeter("pathdb/history/reader/stale/retry", nil)
 )
