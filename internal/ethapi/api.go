@@ -19,6 +19,7 @@ package ethapi
 import (
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	gomath "math"
@@ -41,6 +42,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/eth/gasestimator"
+	"github.com/ethereum/go-ethereum/eth/receipts"
 	"github.com/ethereum/go-ethereum/eth/tracers/logger"
 	"github.com/ethereum/go-ethereum/internal/ethapi/override"
 	"github.com/ethereum/go-ethereum/log"
@@ -625,7 +627,9 @@ func (api *BlockChainAPI) GetBlockReceipts(ctx context.Context, blockNrOrHash rp
 		block    *types.Block
 		receipts types.Receipts
 	)
+	isPending := false
 	if blockNr, ok := blockNrOrHash.Number(); ok && blockNr == rpc.PendingBlockNumber {
+		isPending = true
 		block, receipts, _ = api.b.Pending()
 		if block == nil {
 			return nil, errors.New("pending receipts is not available")
@@ -634,6 +638,14 @@ func (api *BlockChainAPI) GetBlockReceipts(ctx context.Context, blockNrOrHash rp
 		block, err = api.b.BlockByNumberOrHash(ctx, blockNrOrHash)
 		if block == nil || err != nil {
 			return nil, err
+		}
+		if cache := api.receiptCache(); cache != nil {
+			if raw := cache.Get(block.Hash(), block.NumberU64()); raw != nil {
+				var cached []map[string]interface{}
+				if err := json.Unmarshal(raw, &cached); err == nil {
+					return cached, nil
+				}
+			}
 		}
 		receipts, err = api.b.GetReceipts(ctx, block.Hash())
 		if err != nil {
@@ -660,7 +672,25 @@ func (api *BlockChainAPI) GetBlockReceipts(ctx context.Context, blockNrOrHash rp
 		}
 		result[i] = MarshalReceipt(receipt, block.Hash(), block.NumberU64(), signer, txs[i], i, api.b.ChainConfig(), header, blockMetadata)
 	}
+	if !isPending {
+		if cache := api.receiptCache(); cache != nil {
+			if raw, err := json.Marshal(result); err == nil {
+				cache.Put(block.Hash(), block.NumberU64(), raw)
+			}
+		}
+	}
 	return result, nil
+}
+
+// receiptCache returns the optional cache without making it part of the
+// broad ethapi.Backend interface. Stock and third-party backends therefore
+// keep compiling and retain the original live-read behavior.
+func (api *BlockChainAPI) receiptCache() receipts.Cache {
+	backend, ok := api.b.(interface{ ReceiptCache() receipts.Cache })
+	if !ok {
+		return nil
+	}
+	return backend.ReceiptCache()
 }
 
 // ChainContextBackend provides methods required to implement ChainContext.

@@ -196,12 +196,20 @@ func (db *Database) StateReader(root common.Hash) (database.StateReader, error) 
 	}, nil
 }
 
+// historicStaleRetries bounds how many times a historical read re-resolves the
+// bottom disk layer after finding it stale. Each retry observes a strictly
+// newer layer, so a handful is far more than a flush burst needs.
+const historicStaleRetries = 8
+
 // HistoricalStateReader is a wrapper over history reader, providing access to
 // historical state.
 type HistoricalStateReader struct {
 	db     *Database
 	reader *historyReader
 	id     uint64
+	// bottom resolves the current disk layer; indirected so tests can hand
+	// the reader a layer that has already gone stale.
+	bottom func() *diskLayer
 }
 
 // HistoricReader constructs a reader for accessing the requested historic state.
@@ -235,6 +243,7 @@ func (db *Database) HistoricReader(root common.Hash) (*HistoricalStateReader, er
 		id:     *id,
 		db:     db,
 		reader: newHistoryReader(db.diskdb, db.stateFreezer),
+		bottom: db.tree.bottom,
 	}, nil
 }
 
@@ -250,22 +259,27 @@ func (r *HistoricalStateReader) AccountRLP(address common.Address) ([]byte, erro
 		historicalAccountReadTimer.UpdateSince(start)
 	}(time.Now())
 
-	// TODO(rjl493456442): Theoretically, the obtained disk layer could become stale
-	// within a very short time window.
-	//
-	// While reading the account data while holding `db.tree.lock` can resolve
-	// this issue, but it will introduce a heavy contention over the lock.
-	//
-	// Let's optimistically assume the situation is very unlikely to happen,
-	// and try to define a low granularity lock if the current approach doesn't
-	// work later.
-	dl := r.db.tree.bottom()
+	// The bottom disk layer is read without db.tree.lock, so a concurrent
+	// flush can mark it stale between bottom() and the read. That is not
+	// theoretical on a syncing archive node: the bottom layer turns over about
+	// once per block, and a parallel range trace issues thousands of historic
+	// reads per block. A stale read here surfaces as errSnapshotStale, which
+	// core/state swallows into a zero value (state_object.go GetCommittedState),
+	// i.e. silently wrong state for the caller. Retry against the fresh bottom
+	// layer instead; the window is transient and holding the tree lock across
+	// the read would contend with every flush.
 	hash := crypto.Keccak256Hash(address.Bytes())
-	latest, err := dl.account(hash, 0)
-	if err != nil {
-		return nil, err
+	for attempt := 0; ; attempt++ {
+		dl := r.bottom()
+		latest, err := dl.account(hash, 0)
+		if err == nil {
+			return r.reader.read(newAccountIdentQuery(address, hash), r.id, dl.stateID(), latest)
+		}
+		if !errors.Is(err, errSnapshotStale) || attempt >= historicStaleRetries {
+			return nil, err
+		}
+		historicalStaleRetryMeter.Mark(1)
 	}
-	return r.reader.read(newAccountIdentQuery(address, hash), r.id, dl.stateID(), latest)
 }
 
 // Account directly retrieves the account associated with a particular address in
@@ -300,21 +314,26 @@ func (r *HistoricalStateReader) Storage(address common.Address, key common.Hash)
 		historicalStorageReadTimer.UpdateSince(start)
 	}(time.Now())
 
-	// TODO(rjl493456442): Theoretically, the obtained disk layer could become stale
-	// within a very short time window.
-	//
-	// While reading the account data while holding `db.tree.lock` can resolve
-	// this issue, but it will introduce a heavy contention over the lock.
-	//
-	// Let's optimistically assume the situation is very unlikely to happen,
-	// and try to define a low granularity lock if the current approach doesn't
-	// work later.
-	dl := r.db.tree.bottom()
+	// The bottom disk layer is read without db.tree.lock, so a concurrent
+	// flush can mark it stale between bottom() and the read. That is not
+	// theoretical on a syncing archive node: the bottom layer turns over about
+	// once per block, and a parallel range trace issues thousands of historic
+	// reads per block. A stale read here surfaces as errSnapshotStale, which
+	// core/state swallows into a zero value (state_object.go GetCommittedState),
+	// i.e. silently wrong state for the caller. Retry against the fresh bottom
+	// layer instead; the window is transient and holding the tree lock across
+	// the read would contend with every flush.
 	addrHash := crypto.Keccak256Hash(address.Bytes())
 	keyHash := crypto.Keccak256Hash(key.Bytes())
-	latest, err := dl.storage(addrHash, keyHash, 0)
-	if err != nil {
-		return nil, err
+	for attempt := 0; ; attempt++ {
+		dl := r.bottom()
+		latest, err := dl.storage(addrHash, keyHash, 0)
+		if err == nil {
+			return r.reader.read(newStorageIdentQuery(address, addrHash, key, keyHash), r.id, dl.stateID(), latest)
+		}
+		if !errors.Is(err, errSnapshotStale) || attempt >= historicStaleRetries {
+			return nil, err
+		}
+		historicalStaleRetryMeter.Mark(1)
 	}
-	return r.reader.read(newStorageIdentQuery(address, addrHash, key, keyHash), r.id, dl.stateID(), latest)
 }
