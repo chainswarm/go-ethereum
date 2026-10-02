@@ -377,10 +377,17 @@ func (f *chainFreezer) Ancient(kind string, number uint64) ([]byte, error) {
 
 // ReadAncients executes an operation while preventing mutations to the freezer,
 // i.e. if fn performs multiple reads, they will be consistent with each other.
+//
+// It takes the read side of the freezer's write lock, like Freezer.ReadAncients:
+// writers (ModifyAncients, TruncateHead, TruncateTail, Close) stay exclusive,
+// but concurrent readers no longer serialise behind each other. The era
+// backend has its own lock. fn must not call anything that takes writeLock
+// (including AncientSize or a nested ReadAncients): a recursive RLock
+// deadlocks once a writer is waiting.
 func (f *chainFreezer) ReadAncients(fn func(ethdb.AncientReaderOp) error) (err error) {
 	if store, ok := f.ancients.(*Freezer); ok {
-		store.writeLock.Lock()
-		defer store.writeLock.Unlock()
+		store.writeLock.RLock()
+		defer store.writeLock.RUnlock()
 	}
 	return fn(f)
 }
