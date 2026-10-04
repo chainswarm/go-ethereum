@@ -1,0 +1,8 @@
+{
+  "tiers": {
+    "t1": {"script": "ci/t1.sh", "budget_seconds": 900,
+           "packages": ["./arbitrum", "./core", "./core/rawdb", "./eth", "./eth/receipts",
+                        "./eth/tracers", "./eth/tracers/native", "./internal/ethapi",
+                        "./triedb/pathdb"]}
+  }
+}
